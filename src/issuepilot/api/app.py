@@ -15,12 +15,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from issuepilot.agent import FixResult, run_agent
-from issuepilot.budget import Limits
+from issuepilot.budget import BudgetExceeded, Cancelled, Limits
 from issuepilot.config import Settings, load_dotenv
 from issuepilot.github import GitError, GitHubClient, GitHubError, parse_slug
 from issuepilot.llm.base import LLMProvider
 from issuepilot.llm.deepseek import DeepSeekProvider
-from issuepilot.modes import Mode
+from issuepilot.modes import Mode, PermissionDenied
 from issuepilot.orchestrator import (
     ExtensionError,
     budget_suggestion,
@@ -32,7 +32,7 @@ from issuepilot.orchestrator import (
 )
 from issuepilot.persistence import RunStore
 from issuepilot.persistence.tasks import TaskStore
-from issuepilot.publish import NotApproved, approve, publish_task, reject
+from issuepilot.publish import NotApproved, approve, merge_task, publish_task, reject
 from issuepilot.sandbox import Sandbox, SandboxUnavailable, default_sandbox
 from issuepilot.security import resolve_subdir
 
@@ -65,6 +65,10 @@ class ExtendRequest(BaseModel):
 class PublishRequest(BaseModel):
     slug: str | None = None
     remote: str | None = None
+
+
+class MergeRequest(BaseModel):
+    confirm: bool
 
 
 class FixResponse(BaseModel):
@@ -216,7 +220,7 @@ def create_app(
 
     @app.post("/tasks/{tid}/publish")
     def publish(tid: str, req: PublishRequest | None = None) -> dict[str, Any]:
-        """Open a DRAFT PR for an approved task. There is deliberately no merge endpoint."""
+        """Open a DRAFT PR for an approved task."""
         rec = tasks.get(tid)
         if rec is None:
             raise HTTPException(404, "unknown task")
@@ -236,6 +240,35 @@ def create_app(
             raise HTTPException(409, str(exc)) from exc
         except (GitHubError, GitError, SandboxUnavailable) as exc:
             raise HTTPException(502, str(exc)[:500]) from exc
+        return _view(tid)
+
+    @app.post("/tasks/{tid}/merge")
+    def merge(tid: str, req: MergeRequest) -> dict[str, Any]:
+        """Merge only after explicit dashboard approval, verified result and green GitHub checks."""
+        if not req.confirm:
+            raise HTTPException(400, "explicit merge confirmation is required")
+        rec = tasks.get(tid)
+        if rec is None:
+            raise HTTPException(404, "unknown task")
+        if (
+            rec.status != "pr_opened"
+            or rec.approval != "approved"
+            or rec.outcome != "verified"
+            or not rec.pr_number
+        ):
+            raise HTTPException(
+                409, "only an approved, verified task with a published PR can merge"
+            )
+        token = os.environ.get("GITHUB_TOKEN", "")
+        try:
+            client = github_factory() if github_factory else GitHubClient(token)
+            merge_task(settings, tasks, tid, client, token=token)
+        except NotApproved as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except GitHubError as exc:
+            raise HTTPException(409, str(exc)[:500]) from exc
+        except (BudgetExceeded, Cancelled, PermissionDenied) as exc:
+            raise HTTPException(409, str(exc)[:500]) from exc
         return _view(tid)
 
     @app.get("/health")

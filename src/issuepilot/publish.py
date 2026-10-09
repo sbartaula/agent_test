@@ -1,12 +1,9 @@
-"""PR Agent mode: approval-gated branch/commit/push/draft-PR, then bounded CI follow-ups.
-
-Nothing here can merge or write to the default branch: GitWorkspace refuses non-`issuepilot/`
-branches and GitHubClient has no merge endpoint.
-"""
+"""PR Agent mode: approval-gated branch/commit/push/draft-PR and bounded CI follow-ups."""
 
 from __future__ import annotations
 
 import json
+from urllib.parse import urlsplit
 
 from issuepilot.agent.graph import FixResult, run_agent
 from issuepilot.budget import BudgetExceeded, Cancelled, Counters, Limits
@@ -146,6 +143,70 @@ def publish_task(
     except (GitError, GitHubError, ToolError, PermissionDenied, BudgetExceeded, Cancelled) as exc:
         store.update(task_id, error=str(exc)[:800])
         ctx.event("publish_failed", str(exc)[:500])
+        raise
+    finally:
+        ctx.flush()
+    return _get(store, task_id)
+
+
+def merge_task(
+    settings: Settings,
+    store: TaskStore,
+    task_id: str,
+    client: GitHubClient,
+    *,
+    token: str = "",
+) -> TaskRecord:
+    """Merge a published verified PR after explicit user approval and successful CI."""
+    rec = _get(store, task_id)
+    if (
+        rec.status != "pr_opened"
+        or rec.approval != "approved"
+        or rec.outcome != "verified"
+        or not rec.pr_number
+        or not rec.branch
+    ):
+        raise NotApproved("only an approved, verified task with an open PR can be merged")
+
+    pr_url = urlsplit(rec.pr_url)
+    parts = pr_url.path.strip("/").split("/")
+    if (
+        pr_url.scheme != "https"
+        or pr_url.netloc != "github.com"
+        or len(parts) != 4
+        or parts[2] != "pull"
+        or not parts[3].isdigit()
+        or int(parts[3]) != rec.pr_number
+    ):
+        raise NotApproved("stored pull request URL is invalid")
+    slug = f"{parts[0]}/{parts[1]}"
+
+    ctx = _ctx(settings, store, rec, token)
+    try:
+        base = client.default_branch(slug)
+        with ctx.tool(
+            "merge_pull_request",
+            Capability.GITHUB_WRITE,
+            pull_number=rec.pr_number,
+            branch=rec.branch,
+            base=base,
+        ):
+            result = client.merge_pull_request(
+                slug, rec.pr_number, expected_branch=rec.branch, expected_base=base
+            )
+        from datetime import UTC, datetime
+
+        store.update(
+            task_id,
+            status="merged",
+            merged_at=datetime.now(UTC).isoformat(),
+            merge_sha=result["sha"],
+            error="",
+        )
+        ctx.event("pr_merged", result["message"], sha=result["sha"], base=base)
+    except (GitHubError, ToolError, PermissionDenied, BudgetExceeded, Cancelled) as exc:
+        store.update(task_id, error=str(exc)[:800])
+        ctx.event("merge_failed", str(exc)[:500])
         raise
     finally:
         ctx.flush()

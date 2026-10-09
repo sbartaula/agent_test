@@ -13,7 +13,7 @@ from issuepilot.github import GitError, GitHubClient, GitHubError, GitWorkspace,
 from issuepilot.modes import Mode
 from issuepilot.orchestrator import create_task, run_task
 from issuepilot.persistence.tasks import TaskStore
-from issuepilot.publish import NotApproved, approve, ci_followup, publish_task, reject
+from issuepilot.publish import NotApproved, approve, ci_followup, merge_task, publish_task, reject
 from issuepilot.sandbox.local import LocalSandbox
 from issuepilot.tools.patching import Edit
 from tests.conftest import FakeProvider
@@ -62,11 +62,36 @@ class FakeGitHub:
         self.requests: list[tuple[str, str]] = []
         self.checks = checks or []
         self.pr_body: dict = {}
+        self.pr_is_draft = True
+        self.merged = False
+        self.branch = "issuepilot/task"
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         self.requests.append((req.method, req.url.path))
         if req.url.path == "/repos/o/r":
             return httpx.Response(200, json={"default_branch": "main"})
+        if req.url.path == "/repos/o/r/pulls/7" and req.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "state": "closed" if self.merged else "open",
+                    "merged": self.merged,
+                    "draft": self.pr_is_draft,
+                    "head": {"ref": self.branch, "sha": "head-sha"},
+                    "base": {"ref": "main"},
+                },
+            )
+        if req.url.path == "/repos/o/r/pulls/7" and req.method == "PATCH":
+            self.pr_is_draft = False
+            return httpx.Response(200, json={"draft": False})
+        if req.url.path == "/repos/o/r/pulls/7/merge" and req.method == "PUT":
+            payload = json.loads(req.content)
+            if payload["sha"] != "head-sha":
+                return httpx.Response(409, json={"message": "head changed"})
+            self.merged = True
+            return httpx.Response(
+                200, json={"merged": True, "message": "Pull Request successfully merged"}
+            )
         if req.url.path == "/repos/o/r/pulls" and req.method == "POST":
             self.pr_body = json.loads(req.content)
             return httpx.Response(
@@ -76,6 +101,20 @@ class FakeGitHub:
             )  # fmt: skip
         if req.url.path.endswith("/check-runs"):
             return httpx.Response(200, json={"check_runs": self.checks})
+        if req.url.path.endswith("/status"):
+            state = "none"
+            if any(r["status"] != "completed" for r in self.checks):
+                state = "pending"
+            elif self.checks:
+                state = (
+                    "failure"
+                    if any(
+                        r.get("conclusion") not in ("success", "neutral", "skipped")
+                        for r in self.checks
+                    )
+                    else "success"
+                )
+            return httpx.Response(200, json={"state": state, "statuses": []})
         if "/annotations" in req.url.path:
             return httpx.Response(
                 200, json=[{"path": "calc.py", "start_line": 2, "message": "boom"}]
@@ -124,6 +163,52 @@ def test_pr_requires_approval_and_opens_draft_on_dedicated_branch(
     assert "a - b" in git(remote, "show", "main:calc.py")
     assert "a + b" in git(remote, "show", f"{rec.branch}:calc.py")
     assert not any(m == "PUT" or "merge" in p for m, p in gh.requests)
+
+
+def test_merge_task_requires_explicitly_approved_verified_published_task(
+    settings, store, remote, tmp_path
+) -> None:  # type: ignore[no-untyped-def]
+    tid = pr_task(settings, store, remote, tmp_path)
+    with pytest.raises(NotApproved):
+        merge_task(settings, store, tid, FakeGitHub().client())
+
+    approve(store, tid)
+    publish_gh = FakeGitHub()
+    publish_task(settings, store, tid, publish_gh.client(), slug="o/r", remote=str(remote))
+    gh = FakeGitHub([{"id": 3, "name": "tests", "status": "completed", "conclusion": "success"}])
+    gh.branch = f"issuepilot/{tid}"
+    merged = merge_task(settings, store, tid, gh.client())
+    assert merged.status == "merged"
+    assert merged.merge_sha == "head-sha" and merged.merged_at
+    assert any(e.kind == "pr_merged" for e in store.events(tid))
+
+
+def test_merge_failure_leaves_pr_open_and_records_reason(settings, store, remote, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tid = pr_task(settings, store, remote, tmp_path)
+    approve(store, tid)
+    publish_task(settings, store, tid, FakeGitHub().client(), slug="o/r", remote=str(remote))
+    gh = FakeGitHub([{"id": 1, "name": "tests", "status": "completed", "conclusion": "failure"}])
+    gh.branch = f"issuepilot/{tid}"
+    with pytest.raises(GitHubError, match="checks are failure"):
+        merge_task(settings, store, tid, gh.client())
+    rec = store.get(tid)
+    assert rec and rec.status == "pr_opened" and not gh.merged
+    assert "checks are failure" in rec.error
+    assert any(e.kind == "merge_failed" for e in store.events(tid))
+
+
+def test_merge_target_is_derived_from_the_saved_pull_request(
+    settings, store, remote, tmp_path
+) -> None:  # type: ignore[no-untyped-def]
+    tid = pr_task(settings, store, remote, tmp_path)
+    approve(store, tid)
+    publish_task(settings, store, tid, FakeGitHub().client(), slug="o/r", remote=str(remote))
+    store.update(tid, pr_url="https://github.com/other/repo/pull/8")
+    gh = FakeGitHub([{"id": 1, "name": "tests", "status": "completed", "conclusion": "success"}])
+    gh.branch = f"issuepilot/{tid}"
+    with pytest.raises(NotApproved, match="invalid"):
+        merge_task(settings, store, tid, gh.client())
+    assert not gh.requests
 
 
 def test_unapproved_or_rejected_cannot_publish(settings, store, remote, tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -190,8 +275,30 @@ def test_github_error_redacts_token() -> None:
     assert "ghp_y" not in str(ei.value)
 
 
-def test_client_has_no_merge_api() -> None:
-    assert not [n for n in dir(GitHubClient) if "merge" in n.lower()]
+def test_merge_requires_green_checks_and_expected_pr() -> None:
+    pass_checks = [{"id": 3, "name": "tests", "status": "completed", "conclusion": "success"}]
+    gh = FakeGitHub(pass_checks)
+    result = gh.client().merge_pull_request(
+        "o/r", 7, expected_branch="issuepilot/task", expected_base="main"
+    )
+    assert result == {"sha": "head-sha", "message": "Pull Request successfully merged"}
+    assert gh.pr_is_draft is False and gh.merged
+    assert ("PUT", "/repos/o/r/pulls/7/merge") in gh.requests
+
+    for checks in (
+        [],
+        [{"id": 4, "name": "test", "status": "in_progress", "conclusion": None}],
+        [{"id": 5, "name": "test", "status": "completed", "conclusion": "failure"}],
+    ):
+        with pytest.raises(GitHubError, match="checks are"):
+            FakeGitHub(checks).client().merge_pull_request(
+                "o/r", 7, expected_branch="issuepilot/task", expected_base="main"
+            )
+
+    with pytest.raises(GitHubError, match="head branch"):
+        FakeGitHub(pass_checks).client().merge_pull_request(
+            "o/r", 7, expected_branch="issuepilot/other", expected_base="main"
+        )
 
 
 def test_draft_flag_enforced() -> None:

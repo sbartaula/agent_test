@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     elapsed_s REAL NOT NULL DEFAULT 0, limits_json TEXT NOT NULL DEFAULT '{}',
     result_json TEXT NOT NULL DEFAULT '{}', branch TEXT NOT NULL DEFAULT '',
     pr_url TEXT NOT NULL DEFAULT '', pr_number INTEGER NOT NULL DEFAULT 0,
+    merged_at TEXT NOT NULL DEFAULT '', merge_sha TEXT NOT NULL DEFAULT '',
     ci_rounds INTEGER NOT NULL DEFAULT 0, cancel_requested INTEGER NOT NULL DEFAULT 0,
     subdir TEXT NOT NULL DEFAULT ''
 );
@@ -34,7 +35,15 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, id);
 """
 
-TERMINAL = {"completed", "failed", "cancelled", "budget_exceeded", "pr_opened", "rejected"}
+TERMINAL = {
+    "completed",
+    "failed",
+    "cancelled",
+    "budget_exceeded",
+    "pr_opened",
+    "rejected",
+    "merged",
+}
 
 
 class TaskRecord(BaseModel):
@@ -61,6 +70,8 @@ class TaskRecord(BaseModel):
     branch: str = ""
     pr_url: str = ""
     pr_number: int = 0
+    merged_at: str = ""
+    merge_sha: str = ""
     ci_rounds: int = 0
     cancel_requested: int = 0
     subdir: str = ""  # project folder inside the git repo (monorepo support)
@@ -89,6 +100,10 @@ class TaskStore:
             cols = {r[1] for r in c.execute("PRAGMA table_info(tasks)")}
             if "subdir" not in cols:  # databases created before monorepo support
                 c.execute("ALTER TABLE tasks ADD COLUMN subdir TEXT NOT NULL DEFAULT ''")
+            if "merged_at" not in cols:
+                c.execute("ALTER TABLE tasks ADD COLUMN merged_at TEXT NOT NULL DEFAULT ''")
+            if "merge_sha" not in cols:
+                c.execute("ALTER TABLE tasks ADD COLUMN merge_sha TEXT NOT NULL DEFAULT ''")
 
     def _conn(self) -> sqlite3.Connection:
         c = sqlite3.connect(self._path, timeout=30)

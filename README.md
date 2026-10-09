@@ -1,7 +1,7 @@
 # IssuePilot
 
-**A local agent that turns a GitHub issue into a *verified* patch, and, only after you approve,
-a draft pull request. Every step is sandboxed, budgeted and logged.**
+**A local agent that turns a GitHub issue into a *verified* patch and, after human approval, a
+draft pull request. Merging requires a separate explicit dashboard confirmation.**
 
 ## What it does, why, and how
 
@@ -33,6 +33,7 @@ issue -> plan -> gather -> analyse (observe)
                                                      |
                       verified? -- PR mode --> awaiting_approval -> approve -> branch/commit/push
                                                                       -> DRAFT PR -> read CI -> <=K follow-ups
+                                                                      -> confirm merge (green checks only)
 ```
 
 ## Results at a glance
@@ -42,7 +43,8 @@ issue -> plan -> gather -> analyse (observe)
   [docs/EVALUATION.md](docs/EVALUATION.md) for the limits of this number.
 - **Harness evals: 16/16** (2 success, 5 failure, 9 security cases) with scripted hostile models.
 - 100+ unit/integration tests, `ruff` and strict `mypy` clean.
-- Not yet shown: a real GitHub draft PR (the push/PR flow is tested against a local bare remote and a mocked API).
+- The draft-PR and explicit-merge flows are tested against a local bare remote and mocked GitHub API;
+  neither has yet been exercised against a live GitHub repository.
 
 Docs: [Architecture](docs/ARCHITECTURE.md) | [Evaluation](docs/EVALUATION.md)
 
@@ -62,7 +64,11 @@ analyses and tests only that folder; the PR commit touches `examples/bookshelf/.
 
 Draft PR flow (needs a fine-grained token exported in *your* shell):
 `export GITHUB_TOKEN=...` → `issuepilot fix ... --mode pr` → `issuepilot approve <id>` →
-`issuepilot publish <id> --slug owner/repo`. Never merges, never pushes to the default branch.
+`issuepilot publish <id> --slug owner/repo`. This never merges automatically and never pushes
+the fix branch to the default branch. In the dashboard, **Merge PR** appears only for an approved,
+verified published task. Clicking it asks for a second confirmation; the server checks that the
+PR is still open, its branch/base match the task, and all GitHub check runs pass before merging.
+Missing, pending or failing checks block the merge. The actual merge writes to the PR's base branch.
 
 ## Setup
 ```bash
@@ -76,7 +82,7 @@ docker --version         # needed for sandboxed test runs (python:3.12-slim is p
 |---|---|---|
 | `observe` | read repo, static + LLM analysis, GitHub reads | edit, run tests, write anywhere |
 | `develop` (default) | + edit a disposable copy, run tests in the sandbox, produce a patch | touch your repo, GitHub writes |
-| `pr` | + after **explicit approval**: push `issuepilot/<task>`, open a **draft** PR, read CI, bounded follow-ups | merge, push to the default branch, edit workflows |
+| `pr` | + after **explicit approval**: push `issuepilot/<task>`, open a **draft** PR, read CI, bounded follow-ups; separately confirm a merge in the dashboard after checks pass | automatic merge, push the fix branch to the default branch, edit workflows |
 
 Enforced in code (`modes.py`, every tool call goes through `TaskContext.tool`), not by prompt.
 
@@ -87,6 +93,7 @@ uv run issuepilot fix "..." --repo ~/code/app --mode observe                    
 uv run issuepilot fix "..." --repo ~/code/app --mode pr                               # -> awaiting_approval
 uv run issuepilot tasks; uv run issuepilot task <id>                                  # history + event log
 uv run issuepilot approve <id>; uv run issuepilot publish <id>                        # needs GITHUB_TOKEN
+# then select the task in the dashboard and use "Merge PR" only after reviewing it
 uv run issuepilot ci <id>                                                             # read CI, <=2 fix rounds
 uv run issuepilot cancel <id>; uv run issuepilot resume <id>
 uv run issuepilot discover --repo ~/code/app          # proactive bug report (read-only)
@@ -120,7 +127,7 @@ absolute ceilings ($5, 3600 s, 500 tool calls), and every extension is written t
 - `verified`: suite passes after the fix **and** at least one test fails on the original code and passes with the fix.
 - `unproven`: suite passes but nothing demonstrates the fix (the agent first asks the model for a regression test).
 - `tests_failed`, `failed`, `unverified` (tests skipped), `analysis_only` (observe).
-- Task statuses: `running`, `completed`, `awaiting_approval`, `pr_opened`, `rejected`, `failed`, `cancelled`, `budget_exceeded`, `interrupted`.
+- Task statuses: `running`, `completed`, `awaiting_approval`, `pr_opened`, `merged`, `rejected`, `failed`, `cancelled`, `budget_exceeded`, `interrupted`.
 - Only `verified` results can be approved for a PR.
 
 ## GitHub token (PR mode)
@@ -166,7 +173,8 @@ and new tests go into new files. (These pre-date fail-to-pass verification; toda
 - `budget.py` limits/cancellation. `modes.py` permissions. `security.py` redaction + protected paths.
 - `sandbox/` Docker (default) or opt-in local runner. `verify.py` fail-to-pass logic.
 - `tools/` repo read, exact-match patching, GitHub issue read. `github/` REST client + fixed-argv git.
-- `publish.py` approval, push, draft PR, CI follow-ups. `discovery.py` proactive findings.
+- `publish.py` approval, push, draft PR, CI follow-ups and confirmation-gated merge. `discovery.py`
+  proactive findings.
 - `orchestrator.py` task lifecycle. `persistence/` tasks, events, run history. `api/` FastAPI + UI. `evals/`.
 
 ## Safety model
@@ -176,8 +184,10 @@ and new tests go into new files. (These pre-date fail-to-pass verification; toda
   Dependencies are installed in a separate pip-only step (that step runs package install code with
   network access but no secrets and no repo code). `--sandbox local` is unsafe and opt-in.
 - Edits to `.git`, `.github`, CI configs, `.env`/keys and path escapes are rejected.
-- Git: fixed argv, only `issuepilot/<id>` branches, never `--force`, never the default branch,
-  stages only edited paths; the clone is re-verified in the sandbox before pushing. No merge API exists.
+- Git: fixed argv, only `issuepilot/<id>` branches, never `--force`, never pushes the fix branch to
+  the default branch, stages only edited paths; the clone is re-verified in the sandbox before
+  pushing. A merge is a separate irreversible write to the PR base, gated by a second dashboard
+  confirmation, an approved verified task, branch/base/head checks, and successful GitHub checks.
 - Everything audit-logged to SQLite with secret redaction. API has no auth: keep it on localhost.
 - Issue text and file contents are untrusted prompt input (mitigation, not a guarantee); the
   permission/path/branch controls above hold even if the model is fully manipulated.

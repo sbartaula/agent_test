@@ -60,6 +60,7 @@ mode, (2) charges the tool-call budget, (3) writes an audit event with duration 
 | `github_read` (issues, CI results) | ✅ | ✅ | ✅ |
 | `sandbox` (edit a copy, run tests in Docker) | ❌ | ✅ | ✅ |
 | `github_write` (branch, commit, push, draft PR) | ❌ | ❌ | ✅ after approval |
+| merge PR | ❌ | ❌ | ✅ only after a separate dashboard confirmation |
 
 There is deliberately **no generic shell tool**. The model can only emit structured edits; the only
 commands that ever execute are fixed ones (`pytest` in the sandbox, a handful of `git` calls built
@@ -111,15 +112,22 @@ verified (PR mode) ─▶ awaiting_approval ─▶ human clicks Approve ─▶ p
                                               │
           clone ─▶ branch issuepilot/<id> ─▶ apply edits ─▶ re-verify in sandbox ─▶ commit
           (only edited paths staged) ─▶ push that branch ─▶ open DRAFT PR ─▶ read CI ─▶ ≤2 follow-ups
+                                                           └─ human confirms merge in dashboard
 ```
 
 - The branch name must match `issuepilot/<id>`; pushing to the default branch, `--force` and
-  merging are not implemented at all (`GitHubClient` has no merge method and sends `draft=true`).
+  automatic merging are prohibited. Merging is a separate dashboard action with a second browser
+  confirmation. It requires an approved, verified task; the PR must still be open and its head
+  branch, base branch and head SHA must match; and current GitHub check runs must all pass. Missing,
+  pending or failed checks block it. GitHub receives the checked head SHA as an optimistic
+  concurrency guard, then the task is recorded as `merged`.
 - The token is passed to git through a `GIT_ASKPASS` helper and redacted from all logs.
 - Minimum credentials: a fine-grained token scoped to **one repository** with Contents and
-  Pull requests read/write (Actions read optional, for CI summaries).
+  Pull requests read/write (Actions/checks read for CI summaries and merge gating).
 - CI follow-ups are bounded by `max_ci_rounds`; a failing CI is summarised and fed back as new
   evidence rather than retried blindly.
+- The live GitHub merge endpoint is not exercised in automated tests; the merge gate is covered
+  with a mocked API. Repository rulesets and required reviews remain enforced by GitHub itself.
 
 ## 8. Proactive discovery
 

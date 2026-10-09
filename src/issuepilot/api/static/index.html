@@ -16,7 +16,7 @@ button.red{background:var(--bad);color:#fff}button.grn{background:var(--ok);colo
 .task{padding:8px;border-radius:6px;cursor:pointer;border:1px solid transparent}.task:hover,.task.sel{border-color:var(--acc)}
 .task small{color:var(--mut);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;background:#30363d}
-.verified,.completed,.pr_opened{background:#12331c;color:var(--ok)}.failed,.tests_failed,.budget_exceeded,.rejected{background:#3b1519;color:var(--bad)}
+.verified,.completed,.pr_opened,.merged{background:#12331c;color:var(--ok)}.failed,.tests_failed,.budget_exceeded,.rejected{background:#3b1519;color:var(--bad)}
 .running,.awaiting_approval,.unproven,.queued,.interrupted{background:#3a2d0b;color:var(--warn)}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stat b{display:block;font-size:18px}.stat span{color:var(--mut);font-size:12px}
 .bar{height:6px;background:#0d1117;border-radius:3px;margin-top:4px}.bar i{display:block;height:100%;background:var(--acc);border-radius:3px}
@@ -51,7 +51,12 @@ async function start(){$('err').textContent='';try{
  const j=await api('/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue:$('issue').value,repo_path:$('repo').value,subdir:$('subdir').value,mode:$('mode').value,max_cost_usd:+$('cost').value})});
  select(j.id)}catch(e){$('err').textContent=e.message}}
 function select(id){sel=id;lastEv=0;evs=[];refresh()}
-async function act(a){try{await api(`/tasks/${sel}/${a}`,{method:'POST'})}catch(e){alert(e.message)}refresh()}
+async function act(a){
+ if(a==='merge'&&!confirm('Merge this verified pull request into its target branch? This writes to the repository and cannot be automatically undone. GitHub checks must all be successful.'))return;
+ const opt={method:'POST'};
+ if(a==='merge'){opt.headers={'Content-Type':'application/json'};opt.body=JSON.stringify({confirm:true})}
+ try{await api(`/tasks/${sel}/${a}`,opt)}catch(e){alert(e.message)}refresh()
+}
 function diff(d){return esc(d).split('\n').map(l=>l.startsWith('+')?`<span class="add">${l}</span>`:l.startsWith('-')?`<span class="del">${l}</span>`:l).join('\n')}
 async function refresh(){
  const list=await api('/tasks');
@@ -73,7 +78,8 @@ async function refresh(){
   ${t.status==='awaiting_approval'?'<button class="grn" onclick="act(\'approve\')">Approve</button><button class="red" onclick="act(\'reject\')">Reject</button>':''}
   ${t.approval==='approved'&&t.status==='awaiting_approval'?'<button onclick="act(\'publish\')">Open draft PR</button>':''}
   ${t.status==='budget_exceeded'&&t.budget_suggestion?`<div class="card" style="border-color:var(--bad)"><b>Budget exhausted</b> — ${esc(t.budget_suggestion.reason)}.<br>Suggested to finish: ${t.budget_suggestion.extra_usd?'+$'+t.budget_suggestion.extra_usd:''} ${t.budget_suggestion.extra_tool_calls?'+'+t.budget_suggestion.extra_tool_calls+' tool calls':''} ${t.budget_suggestion.extra_seconds?'+'+t.budget_suggestion.extra_seconds+'s':''} (new caps: $${t.budget_suggestion.new_limits.max_cost_usd} / ${t.budget_suggestion.new_limits.max_tool_calls} calls / ${t.budget_suggestion.new_limits.max_seconds}s). Work done so far is kept.<br><button class="grn" onclick="act('extend')">Approve extra budget &amp; continue</button></div>`:''}
-  ${t.pr_url?`<div>Draft PR: <a style="color:var(--acc)" href="${esc(t.pr_url)}" target="_blank">${esc(t.pr_url)}</a> · branch ${esc(t.branch)} · CI rounds ${t.ci_rounds}</div>`:''}
+  ${t.pr_url?`<div>${t.status==='merged'?'Merged PR':'Draft PR'}: <a style="color:var(--acc)" href="${esc(t.pr_url)}" target="_blank">${esc(t.pr_url)}</a> · branch ${esc(t.branch)} · CI rounds ${t.ci_rounds}${t.merged_at?` · merged ${esc(t.merged_at)}`:''}</div>`:''}
+  ${t.status==='pr_opened'&&t.approval==='approved'&&t.outcome==='verified'?'<div><button class="grn" onclick="act(\'merge\')">Merge PR</button><small> Requires your confirmation and all GitHub checks passing.</small></div>':''}
   ${t.error?`<pre class="err">${esc(t.error)}</pre>`:''}</div>
  ${v?`<div class="card"><h2>Verification ${pill(v.outcome)}</h2><div>${esc(v.detail)}</div>${(v.fail_to_pass||[]).map(x=>`<div class="ev">fail→pass: <b>${esc(x)}</b></div>`).join('')}${v.after_failed&&v.after_failed.length?`<pre>${esc(v.after_failed.join('\n'))}</pre>`:''}</div>`:''}
  ${a?`<div class="card"><h2>Analysis (${esc(a.confidence)} confidence)</h2><div>${esc(a.root_cause)}</div>${(a.evidence||[]).map(e=>`<div class="ev"><b>${esc(e.file)}:${esc(e.lines)}</b> ${esc(e.why)}</div>`).join('')}</div>`:''}
