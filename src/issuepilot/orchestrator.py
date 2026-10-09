@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import threading
+from dataclasses import replace
+from typing import Any
 
 from issuepilot.agent.graph import FixResult, run_agent
 from issuepilot.budget import BudgetExceeded, Cancelled, CancelToken, Counters, Limits
@@ -32,6 +35,82 @@ def request_cancel(store: TaskStore, task_id: str) -> bool:
     if tok:
         tok.cancel()
     return True
+
+
+# Absolute ceilings: even a human-approved extension can never exceed these.
+CEILING = Limits(max_cost_usd=5.0, max_seconds=3600.0, max_tool_calls=500)
+
+
+class ExtensionError(ValueError):
+    pass
+
+
+def budget_suggestion(rec: TaskRecord) -> dict[str, Any] | None:
+    """Heuristic estimate for a budget-stopped task: double whichever limits were exhausted."""
+    if rec.status != "budget_exceeded":
+        return None
+    lim = Limits(**json.loads(rec.limits_json))
+    dflt = Limits()
+    extra: dict[str, Any] = {"extra_usd": 0.0, "extra_seconds": 0.0, "extra_tool_calls": 0}
+    if rec.cost_usd >= lim.max_cost_usd:
+        extra["extra_usd"] = round(max(lim.max_cost_usd, dflt.max_cost_usd - lim.max_cost_usd), 4)
+    if rec.elapsed_s >= lim.max_seconds:
+        extra["extra_seconds"] = max(lim.max_seconds, dflt.max_seconds - lim.max_seconds)
+    if rec.tool_calls >= lim.max_tool_calls:
+        extra["extra_tool_calls"] = max(
+            lim.max_tool_calls, dflt.max_tool_calls - lim.max_tool_calls
+        )
+    if not any(extra.values()):  # reason not attributable: give a modest all-round bump
+        extra = {"extra_usd": round(lim.max_cost_usd / 2, 4), "extra_seconds": lim.max_seconds / 2,
+                 "extra_tool_calls": lim.max_tool_calls // 2}  # fmt: skip
+    new = _extended(lim, **extra)
+    return {
+        **extra,
+        "reason": rec.error,
+        "new_limits": new.to_dict(),
+        "note": (
+            "Heuristic: raises exhausted limit(s) to at least the default, or doubles them. "
+            "Spend so far is kept, not reset."
+        ),
+        "within_ceiling": new == _extended(lim, **extra, clamp=False),
+    }
+
+
+def _cap[T: (int, float)](value: T, ceiling: T, clamp: bool) -> T:
+    return min(value, ceiling) if clamp else value
+
+
+def _extended(lim: Limits, *, extra_usd: float = 0.0, extra_seconds: float = 0.0,
+              extra_tool_calls: int = 0, clamp: bool = True) -> Limits:  # fmt: skip
+    return replace(
+        lim,
+        max_cost_usd=_cap(lim.max_cost_usd + extra_usd, CEILING.max_cost_usd, clamp),
+        max_seconds=_cap(lim.max_seconds + extra_seconds, CEILING.max_seconds, clamp),
+        max_tool_calls=_cap(lim.max_tool_calls + extra_tool_calls, CEILING.max_tool_calls, clamp),
+    )
+
+
+def extend_budget(store: TaskStore, task_id: str, *, extra_usd: float = 0.0,
+                  extra_seconds: float = 0.0, extra_tool_calls: int = 0) -> Limits:  # fmt: skip
+    """Human-approved budget raise for a budget_exceeded task. Never exceeds CEILING."""
+    rec = store.get(task_id)
+    if rec is None:
+        raise KeyError(task_id)
+    if rec.status != "budget_exceeded":
+        raise ExtensionError(f"task is '{rec.status}', only budget_exceeded tasks can be extended")
+    if min(extra_usd, extra_seconds, extra_tool_calls) < 0 or not (
+        extra_usd or extra_seconds or extra_tool_calls
+    ):
+        raise ExtensionError("provide a positive extra_usd, extra_seconds or extra_tool_calls")
+    old = Limits(**json.loads(rec.limits_json))
+    new = _extended(old, extra_usd=extra_usd, extra_seconds=extra_seconds,
+                    extra_tool_calls=extra_tool_calls)  # fmt: skip
+    if new == old:
+        raise ExtensionError("hard ceiling already reached; cannot extend further")
+    store.update(task_id, limits_json=json.dumps(new.to_dict()))
+    store.add_event(task_id, "budget_extended", "human approved a budget extension",
+                    {"old": old.to_dict(), "new": new.to_dict()})  # fmt: skip
+    return new
 
 
 def _watch_cancel(store: TaskStore, task_id: str, tok: CancelToken, stop: threading.Event) -> None:
@@ -74,8 +153,6 @@ def run_task(
     extra_secrets: tuple[str, ...] = (),
 ) -> TaskRecord:
     """Execute an already-created task. Never raises for expected failures; records them."""
-    import json
-
     rec = store.get(task_id)
     assert rec is not None, f"unknown task {task_id}"
     limits = Limits(**json.loads(rec.limits_json))

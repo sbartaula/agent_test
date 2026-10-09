@@ -105,6 +105,17 @@ uv run issuepilot fix "GET /books?page=1 returns books 11-20 instead of 1-10; th
 ```
 Your copy in `/tmp/bookshelf` is never modified; the verified patch is printed (use `-o fix.patch` to save it).
 
+### When a budget is exhausted
+
+Limits are hard stops. A task that hits one ends as `budget_exceeded` (work and spend so far are
+kept). The dashboard then shows what stopped it and an *estimated* extension; a human clicks
+**Approve extra budget & continue** (or runs `issuepilot extend <id> [--usd N --tool-calls N --seconds N]`)
+and the task resumes from its checkpoint and is verified again. The estimate is a heuristic
+(raise the exhausted limit to at least the default, or double it). Extensions can never exceed
+absolute ceilings ($5, 3600 s, 500 tool calls), and every extension is written to the audit log.
+
+![Budget exhausted](docs/screenshots/05-budget-extension.png)
+
 ## Outcomes (what "success" means)
 - `verified`: suite passes after the fix **and** at least one test fails on the original code and passes with the fix.
 - `unproven`: suite passes but nothing demonstrates the fix (the agent first asks the model for a regression test).

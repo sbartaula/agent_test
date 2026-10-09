@@ -58,7 +58,7 @@ def store(settings: Settings) -> TaskStore:
 
 
 def mk(store: TaskStore, repo: Path, mode: Mode = Mode.DEVELOP, **lim: float) -> str:
-    return create_task(store, issue="add is wrong", repo=str(repo), mode=mode, limits=Limits(**lim))  # type: ignore[arg-type]
+    return create_task(store, issue="add is wrong", repo=str(repo), mode=mode, limits=Limits(**lim))
 
 
 def test_verified_task_records_metrics(settings, store, repo) -> None:  # type: ignore[no-untyped-def]
@@ -258,3 +258,36 @@ def test_print_result_without_json_flag(store) -> None:  # type: ignore[no-untyp
 
     tid = store.create(kind="fix", mode="observe", repo="/x", issue="i", limits_json="{}")
     _print_result(store.get(tid), None, argparse.Namespace())  # as called by `resume`
+
+
+def test_extend_budget_then_resume_reaches_verified(settings, store, repo) -> None:  # type: ignore[no-untyped-def]
+    from issuepilot.orchestrator import ExtensionError, budget_suggestion, extend_budget
+
+    tid = mk(store, repo, max_tool_calls=1)
+    rec = run_task(
+        settings, FakeProvider([PLAN, edits("a + b")]), store, tid, sandbox=LocalSandbox()
+    )
+    assert rec.status == "budget_exceeded"
+    sug = budget_suggestion(rec)
+    assert sug and sug["extra_tool_calls"] == 79 and sug["new_limits"]["max_tool_calls"] == 80
+    with pytest.raises(ExtensionError):
+        extend_budget(store, tid)  # nothing requested
+    extend_budget(store, tid, extra_tool_calls=60)
+    assert any(e.kind == "budget_extended" for e in store.events(tid))
+    done = run_task(
+        settings, FakeProvider([PLAN, edits("a + b")]), store, tid,
+        sandbox=LocalSandbox(), resume=True,
+    )  # fmt: skip
+    assert done.outcome == "verified"  # re-verified, not assumed
+
+
+def test_extension_is_capped_and_only_for_budget_stops(settings, store, repo) -> None:  # type: ignore[no-untyped-def]
+    from issuepilot.orchestrator import CEILING, ExtensionError, extend_budget
+
+    tid = mk(store, repo, max_tool_calls=1)
+    run_task(settings, FakeProvider([PLAN, edits("a + b")]), store, tid, sandbox=LocalSandbox())
+    new = extend_budget(store, tid, extra_usd=999, extra_tool_calls=99999)
+    assert new.max_cost_usd == CEILING.max_cost_usd and new.max_tool_calls == CEILING.max_tool_calls
+    store.update(tid, status="completed")
+    with pytest.raises(ExtensionError):
+        extend_budget(store, tid, extra_usd=1)

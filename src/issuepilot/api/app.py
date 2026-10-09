@@ -21,7 +21,15 @@ from issuepilot.github import GitError, GitHubClient, GitHubError, parse_slug
 from issuepilot.llm.base import LLMProvider
 from issuepilot.llm.deepseek import DeepSeekProvider
 from issuepilot.modes import Mode
-from issuepilot.orchestrator import create_task, request_cancel, result_of, run_task
+from issuepilot.orchestrator import (
+    ExtensionError,
+    budget_suggestion,
+    create_task,
+    extend_budget,
+    request_cancel,
+    result_of,
+    run_task,
+)
 from issuepilot.persistence import RunStore
 from issuepilot.persistence.tasks import TaskStore
 from issuepilot.publish import NotApproved, approve, publish_task, reject
@@ -46,6 +54,12 @@ class TaskRequest(BaseModel):
     max_seconds: float = Field(default=Limits.max_seconds, gt=0, le=3600)
     max_tool_calls: int = Field(default=Limits.max_tool_calls, gt=0, le=500)
     max_attempts: int = Field(default=Limits.max_attempts, gt=0, le=6)
+
+
+class ExtendRequest(BaseModel):
+    extra_usd: float = Field(default=0.0, ge=0, le=5)
+    extra_seconds: float = Field(default=0.0, ge=0, le=3600)
+    extra_tool_calls: int = Field(default=0, ge=0, le=500)
 
 
 class PublishRequest(BaseModel):
@@ -90,6 +104,7 @@ def create_app(
         res = result_of(rec)
         data["result"] = res.model_dump() if res else None
         data["limits"] = Limits(**json.loads(rec.limits_json)).to_dict()
+        data["budget_suggestion"] = budget_suggestion(rec)
         return data
 
     @app.get("/", include_in_schema=False)
@@ -145,6 +160,39 @@ def create_app(
         _view(tid)
         request_cancel(tasks, tid)
         return {"status": "cancel_requested"}
+
+    @app.post("/tasks/{tid}/extend", status_code=202)
+    def extend(tid: str, req: ExtendRequest | None = None) -> dict[str, Any]:
+        """Human approval to continue a budget-stopped task with more budget, then resume it."""
+        rec = tasks.get(tid)
+        if rec is None:
+            raise HTTPException(404, "unknown task")
+        sug = budget_suggestion(rec)
+        r = req or ExtendRequest()
+        if not (r.extra_usd or r.extra_seconds or r.extra_tool_calls) and sug:
+            r = ExtendRequest(
+                extra_usd=sug["extra_usd"],
+                extra_seconds=sug["extra_seconds"],
+                extra_tool_calls=sug["extra_tool_calls"],
+            )
+        try:
+            extend_budget(tasks, tid, extra_usd=r.extra_usd, extra_seconds=r.extra_seconds,
+                          extra_tool_calls=r.extra_tool_calls)  # fmt: skip
+            sandbox = make_sandbox() if rec.mode != "observe" else None
+        except ExtensionError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except SandboxUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+
+        def job() -> None:
+            run_task(settings, make_provider(), tasks, tid, sandbox=sandbox,
+                     run_tests=rec.mode != "observe", resume=True)  # fmt: skip
+
+        if inline:
+            job()
+        else:
+            pool.submit(job)
+        return _view(tid)
 
     @app.post("/tasks/{tid}/approve")
     def approve_task(tid: str) -> dict[str, Any]:

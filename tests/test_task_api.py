@@ -100,3 +100,23 @@ def test_startup_marks_running_tasks_interrupted(settings: Settings, repo_root: 
     store.update(tid, status="running")
     c = client(settings, repo_root, [])
     assert c.get(f"/tasks/{tid}").json()["status"] == "interrupted"
+
+
+def test_budget_exceeded_offers_and_applies_extension(settings: Settings, repo_root: Path) -> None:
+    c = client(settings, repo_root, [PLAN, FIX])
+    tid = c.post("/tasks", json={"issue": "bug", "repo_path": "repo", "max_tool_calls": 1}).json()[
+        "id"
+    ]
+    t = c.get(f"/tasks/{tid}").json()
+    assert t["status"] == "budget_exceeded" and t["budget_suggestion"]["extra_tool_calls"] == 79
+    assert c.post(f"/tasks/{tid}/extend", json={}).status_code == 202
+    t = c.get(f"/tasks/{tid}").json()
+    assert t["limits"]["max_tool_calls"] == 80  # suggestion applied, hard cap still enforced
+    assert c.post(f"/tasks/{tid}/extend", json={"extra_usd": 1}).status_code in (202, 409)
+
+
+def test_extend_rejected_for_non_budget_task(settings: Settings, repo_root: Path) -> None:
+    c = client(settings, repo_root, [PLAN, FIX])
+    tid = c.post("/tasks", json={"issue": "bug", "repo_path": "repo"}).json()["id"]
+    assert c.post(f"/tasks/{tid}/extend", json={"extra_usd": 1}).status_code == 409
+    assert c.post("/tasks/nope/extend", json={}).status_code == 404

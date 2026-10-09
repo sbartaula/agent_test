@@ -102,6 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
                        ("resume", "Resume an interrupted task from its checkpoint.")):  # fmt: skip
         sp = sub.add_parser(name, help=text)
         sp.add_argument("task_id")
+    ext = sub.add_parser(
+        "extend", help="Approve more budget for a budget_exceeded task and resume."
+    )
+    ext.add_argument("task_id")
+    ext.add_argument("--usd", type=float, default=0.0, help="extra spend (default: suggested)")
+    ext.add_argument("--seconds", type=float, default=0.0)
+    ext.add_argument("--tool-calls", type=int, default=0)
     for name, text in (("publish", "Push the approved branch and open a DRAFT PR."),
                        ("ci", "Read CI for the branch; bounded follow-up fixes.")):  # fmt: skip
         sp = sub.add_parser(name, help=text)
@@ -343,7 +350,34 @@ def run_admin(args: argparse.Namespace, settings: Settings) -> int:
     elif args.command == "cancel":
         request_cancel(store, rec.id)
         print(f"cancellation requested for {rec.id}")
+    elif args.command == "extend":
+        from issuepilot.orchestrator import ExtensionError, budget_suggestion, extend_budget
+
+        sug = budget_suggestion(rec)
+        usd, secs, calls = args.usd, args.seconds, args.tool_calls
+        if not (usd or secs or calls) and sug:
+            usd, secs, calls = (sug["extra_usd"], sug["extra_seconds"], sug["extra_tool_calls"])
+        try:
+            new = extend_budget(store, rec.id, extra_usd=usd, extra_seconds=secs,
+                                extra_tool_calls=calls)  # fmt: skip
+        except ExtensionError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(
+            f"budget extended: ${new.max_cost_usd}, {new.max_seconds:.0f}s, "
+            f"{new.max_tool_calls} tool calls"
+        )
+        sandbox = default_sandbox() if rec.mode != "observe" else None
+        done = run_task(settings, DeepSeekProvider(settings), store, rec.id,
+                        sandbox=sandbox, resume=True)  # fmt: skip
+        _print_result(done, result_of(done), args)
     elif args.command == "resume":
+        if rec.status == "budget_exceeded":
+            print(
+                f"error: budget exhausted; run `issuepilot extend {rec.id}` to approve more",
+                file=sys.stderr,
+            )
+            return 1
         if rec.status not in ("interrupted", "failed", "running"):
             print(f"error: task is '{rec.status}', not resumable", file=sys.stderr)
             return 1
