@@ -1,0 +1,403 @@
+[
+  {
+    "id": "slugify-double-hyphen",
+    "difficulty": "easy",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.00145545,
+    "tool_calls": 17,
+    "elapsed_s": 13.5,
+    "files_changed": [
+      "textutil.py",
+      "test_slugify.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "median-even-length",
+    "difficulty": "easy",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0011072999999999999,
+    "tool_calls": 15,
+    "elapsed_s": 10.2,
+    "files_changed": [
+      "stats.py",
+      "test_median_even.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "chunk-drops-tail",
+    "difficulty": "easy",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.001497,
+    "tool_calls": 14,
+    "elapsed_s": 12.6,
+    "files_changed": [
+      "lists.py",
+      "test_lists_regression.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "leap-year-centuries",
+    "difficulty": "easy",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0011612999999999999,
+    "tool_calls": 18,
+    "elapsed_s": 10.4,
+    "files_changed": [
+      "calendar_utils.py",
+      "test_is_leap_year_regression.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "wordcount-case",
+    "difficulty": "easy",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.00116595,
+    "tool_calls": 14,
+    "elapsed_s": 10.8,
+    "files_changed": [
+      "words.py",
+      "test_word_count_case_insensitive.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "money-truncation",
+    "difficulty": "easy",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0016305,
+    "tool_calls": 15,
+    "elapsed_s": 13.5,
+    "files_changed": [
+      "billing.py",
+      "test_billing_rounding.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "duration-minutes",
+    "difficulty": "medium",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.00126195,
+    "tool_calls": 13,
+    "elapsed_s": 11.0,
+    "files_changed": [
+      "durations.py",
+      "test_duration_composite.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "intervals-touching",
+    "difficulty": "medium",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0014401499999999999,
+    "tool_calls": 12,
+    "elapsed_s": 11.9,
+    "files_changed": [
+      "intervals.py",
+      "test_merge_regression.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "ratelimit-off-by-one",
+    "difficulty": "medium",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.00193575,
+    "tool_calls": 18,
+    "elapsed_s": 16.8,
+    "files_changed": [
+      "ratelimit.py",
+      "test_ratelimit_regression.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "lru-get-recency",
+    "difficulty": "medium",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0015571499999999998,
+    "tool_calls": 17,
+    "elapsed_s": 12.8,
+    "files_changed": [
+      "cache.py",
+      "test_lru_eviction.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "env-bool-parsing",
+    "difficulty": "medium",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0035487,
+    "tool_calls": 21,
+    "elapsed_s": 25.3,
+    "files_changed": [
+      "config.py",
+      "test_flag_booleans.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "days-between",
+    "difficulty": "medium",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0014401499999999999,
+    "tool_calls": 13,
+    "elapsed_s": 12.7,
+    "files_changed": [
+      "dates.py",
+      "test_dates_regression.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "api-pagination-pages",
+    "difficulty": "medium",
+    "kind": "fastapi",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0020139,
+    "tool_calls": 16,
+    "elapsed_s": 17.8,
+    "files_changed": [
+      "app.py",
+      "test_pagination_regression.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "api-missing-returns-200",
+    "difficulty": "medium",
+    "kind": "fastapi",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0012052499999999997,
+    "tool_calls": 21,
+    "elapsed_s": 13.4,
+    "files_changed": [
+      "app.py",
+      "test_users_404.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "api-create-status-duplicate",
+    "difficulty": "medium",
+    "kind": "fastapi",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0015819,
+    "tool_calls": 19,
+    "elapsed_s": 15.5,
+    "files_changed": [
+      "app.py",
+      "test_tags_status.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "api-filter-inclusive",
+    "difficulty": "medium",
+    "kind": "fastapi",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0013628999999999998,
+    "tool_calls": 20,
+    "elapsed_s": 14.9,
+    "files_changed": [
+      "app.py",
+      "test_products_range.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "api-delete-noop",
+    "difficulty": "medium",
+    "kind": "fastapi",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0015481499999999999,
+    "tool_calls": 18,
+    "elapsed_s": 17.1,
+    "files_changed": [
+      "app.py",
+      "test_notes_delete_regression.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "api-negative-quantity",
+    "difficulty": "medium",
+    "kind": "fastapi",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0015615,
+    "tool_calls": 17,
+    "elapsed_s": 15.4,
+    "files_changed": [
+      "app.py",
+      "tests/test_cart_qty.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "api-token-prefix-auth",
+    "difficulty": "medium",
+    "kind": "fastapi",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0025512,
+    "tool_calls": 19,
+    "elapsed_s": 20.9,
+    "files_changed": [
+      "app.py",
+      "app.py",
+      "test_admin_token.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "api-sort-descending",
+    "difficulty": "medium",
+    "kind": "fastapi",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0011229,
+    "tool_calls": 17,
+    "elapsed_s": 15.2,
+    "files_changed": [
+      "app.py",
+      "test_sort_desc.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "api-mutable-default",
+    "difficulty": "hard",
+    "kind": "fastapi",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0014468999999999999,
+    "tool_calls": 16,
+    "elapsed_s": 14.9,
+    "files_changed": [
+      "app.py",
+      "test_events_regression.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "inventory-not-persisted",
+    "difficulty": "hard",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0027738000000000003,
+    "tool_calls": 20,
+    "elapsed_s": 20.9,
+    "files_changed": [
+      "service.py",
+      "test_reserve_stock.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "cart-total-rounding-misleading",
+    "difficulty": "hard",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0024419999999999997,
+    "tool_calls": 17,
+    "elapsed_s": 18.7,
+    "files_changed": [
+      "money.py",
+      "test_total_rounding.py"
+    ],
+    "note": ""
+  },
+  {
+    "id": "csv-quoted-comma",
+    "difficulty": "hard",
+    "kind": "python",
+    "outcome": "tests_failed",
+    "claimed": false,
+    "correct": false,
+    "cost_usd": 0.0034996499999999995,
+    "tool_calls": 18,
+    "elapsed_s": 22.2,
+    "files_changed": [
+      "csvparse.py",
+      "test_csvparse_quotes.py"
+    ],
+    "note": "oracle failed on patched code"
+  },
+  {
+    "id": "dedupe-keeps-order",
+    "difficulty": "easy",
+    "kind": "python",
+    "outcome": "verified",
+    "claimed": true,
+    "correct": true,
+    "cost_usd": 0.0011508,
+    "tool_calls": 14,
+    "elapsed_s": 10.4,
+    "files_changed": [
+      "uniq.py",
+      "test_dedupe_order.py"
+    ],
+    "note": ""
+  }
+]

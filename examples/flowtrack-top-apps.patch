@@ -1,0 +1,108 @@
+--- a/analyze.py
++++ b/analyze.py
+@@ -562,11 +562,12 @@
+ # ════════════════════════════════════════════════════════════════════════════════
+ 
+ def _top_apps(entries: list[dict], n: int = 10) -> list[tuple[str, float]]:
+-    """Return (app_name, minutes) for the top-n apps by time."""
++    """Return (app_name, minutes) for the top-n apps by time, highest first."""
+     totals: dict[str, float] = defaultdict(float)
+     for e in entries:
+         totals[e.get("app", "unknown")] += e.get("duration", 0) / 60
+-    return sorted(totals.items(), key=lambda x: x[1])[:n]
++    # Rank by time spent descending; app name keeps equal durations stable.
++    return sorted(totals.items(), key=lambda x: (-x[1], x[0]))[:n]
+ 
+ 
+ def generate_text_report(
+--- /dev/null
++++ b/tests/test_top_apps.py
+@@ -0,0 +1,88 @@
++#!/usr/bin/env python3
++"""Regression tests for the 'Top applications by time' report section.
++
++Bug: the section listed the least-used application first because the ranking
++helper sorted durations in ascending order. It must list apps by time spent,
++highest first, and keep the most-used apps when a top-N limit applies.
++"""
++
++from __future__ import annotations
++
++import pytest
++
++import analyze
++
++
++def _entry(app: str, seconds: float) -> dict:
++    return {"app": app, "duration": seconds}
++
++
++def _empty_fatigue() -> dict:
++    return {
++        "morning_rate": 0.0,
++        "afternoon_rate": 0.0,
++        "evening_rate": 0.0,
++        "fatigue_detected": False,
++        "pm_vs_am_pct": 0.0,
++    }
++
++
++def _empty_ctx_switches() -> dict:
++    return {
++        "total_app_switches": 0,
++        "switches_per_hour": 0.0,
++        "top_app_pairs": [],
++    }
++
++
++def test_top_apps_sorted_by_time_spent_highest_first():
++    entries = [
++        _entry("Slack", 5 * 60),
++        _entry("vscode", 3 * 60 * 60),
++    ]
++
++    top = analyze._top_apps(entries)
++
++    assert [app for app, _ in top] == ["vscode", "Slack"]
++    assert top[0][1] == pytest.approx(180.0)
++    assert top[1][1] == pytest.approx(5.0)
++
++
++def test_top_apps_limit_keeps_most_used_apps():
++    entries = [
++        _entry("Slack", 5 * 60),
++        _entry("vscode", 3 * 60 * 60),
++        _entry("chrome", 60 * 60),
++    ]
++
++    top = analyze._top_apps(entries, n=2)
++
++    assert [app for app, _ in top] == ["vscode", "chrome"]
++
++
++def test_top_apps_ties_are_deterministic():
++    entries = [_entry("beta", 60), _entry("alpha", 60)]
++
++    top = analyze._top_apps(entries)
++
++    assert [app for app, _ in top] == ["alpha", "beta"]
++
++
++def test_report_lists_most_used_app_first():
++    entries = [
++        _entry("Slack", 5 * 60),
++        _entry("vscode", 3 * 60 * 60),
++    ]
++
++    report = analyze.generate_text_report(
++        entries,
++        rapid=[],
++        holes=[],
++        fatigue=_empty_fatigue(),
++        visual_bait={},
++        ctx_switches=_empty_ctx_switches(),
++        focus={"daily": 0.0, "hourly": {}},
++    )
++
++    section = report.split("TOP APPLICATIONS BY TIME", 1)[1]
++    assert section.index("vscode") < section.index("Slack")

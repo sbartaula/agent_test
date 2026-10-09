@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>IssuePilot</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#0f1419;--card:#1a212b;--line:#2b3542;--fg:#e6edf3;--mut:#8b98a5;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--acc:#58a6ff}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:baseline}
+h1{font-size:18px;margin:0}header span{color:var(--mut)}
+main{display:grid;grid-template-columns:340px 1fr;gap:16px;padding:16px;max-width:1300px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:12px}
+h2{font-size:13px;margin:0 0 8px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+textarea,input,select{width:100%;background:#0d1117;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
+textarea{min-height:90px}label{display:block;color:var(--mut);font-size:12px;margin-top:8px}
+button{background:var(--acc);color:#04111f;border:0;border-radius:6px;padding:7px 12px;font-weight:600;cursor:pointer;margin:8px 6px 0 0}
+button.red{background:var(--bad);color:#fff}button.grn{background:var(--ok);color:#04111f}button:disabled{opacity:.4}
+.task{padding:8px;border-radius:6px;cursor:pointer;border:1px solid transparent}.task:hover,.task.sel{border-color:var(--acc)}
+.task small{color:var(--mut);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;background:#30363d}
+.verified,.completed,.pr_opened{background:#12331c;color:var(--ok)}.failed,.tests_failed,.budget_exceeded,.rejected{background:#3b1519;color:var(--bad)}
+.running,.awaiting_approval,.unproven,.queued,.interrupted{background:#3a2d0b;color:var(--warn)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stat b{display:block;font-size:18px}.stat span{color:var(--mut);font-size:12px}
+.bar{height:6px;background:#0d1117;border-radius:3px;margin-top:4px}.bar i{display:block;height:100%;background:var(--acc);border-radius:3px}
+pre{background:#0d1117;border:1px solid var(--line);border-radius:6px;padding:8px;overflow:auto;max-height:320px;margin:6px 0;font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap}
+.ev{font:12px ui-monospace,monospace;padding:1px 0;color:var(--mut)}.ev b{color:var(--fg)}.ev .err{color:var(--bad)}
+.add{color:var(--ok)}.del{color:var(--bad)}
+</style></head><body>
+<header><h1>IssuePilot</h1><span>verify-before-claim engineering agent · local</span></header>
+<main>
+<div>
+ <div class="card"><h2>New task</h2>
+  <label>Issue</label><textarea id="issue" placeholder="Describe the bug…"></textarea>
+  <label>Repository path (inside allowed root)</label><input id="repo" value=".">
+  <label>Permission mode</label>
+  <select id="mode"><option value="observe">Observe — read-only analysis</option>
+   <option value="develop" selected>Develop — edit + verify in Docker sandbox</option>
+   <option value="pr">PR Agent — develop, then approval → draft PR</option></select>
+  <label>Max cost (USD)</label><input id="cost" type="number" step="0.01" value="0.10">
+  <button onclick="start()">Start</button><div id="err" style="color:var(--bad)"></div></div>
+ <div class="card"><h2>Tasks</h2><div id="list"></div></div>
+</div>
+<div id="detail"><div class="card">Select or start a task.</div></div>
+</main>
+<script>
+let sel=null, lastEv=0, evs=[];
+function setHTML(id,h){const e=document.getElementById(id);if(e.dataset.h!==h){e.dataset.h=h;e.innerHTML=h}}
+const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const pill=s=>`<span class="pill ${esc(s)}">${esc(s)||'-'}</span>`;
+async function api(path,opt){const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||r.status);return j}
+async function start(){$('err').textContent='';try{
+ const j=await api('/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue:$('issue').value,repo_path:$('repo').value,mode:$('mode').value,max_cost_usd:+$('cost').value})});
+ select(j.id)}catch(e){$('err').textContent=e.message}}
+function select(id){sel=id;lastEv=0;evs=[];refresh()}
+async function act(a){try{await api(`/tasks/${sel}/${a}`,{method:'POST'})}catch(e){alert(e.message)}refresh()}
+function diff(d){return esc(d).split('\n').map(l=>l.startsWith('+')?`<span class="add">${l}</span>`:l.startsWith('-')?`<span class="del">${l}</span>`:l).join('\n')}
+async function refresh(){
+ const list=await api('/tasks');
+ setHTML('list',list.map(t=>`<div class="task ${t.id===sel?'sel':''}" onclick="select('${t.id}')">${pill(t.status)} <small>${esc(t.mode)} · $${t.cost_usd.toFixed(4)} · ${esc(t.issue)}</small></div>`).join('')||'<small>none yet</small>');
+ if(!sel)return;
+ const t=await api('/tasks/'+sel); evs=evs.concat(await api(`/tasks/${sel}/events?after=${lastEv}`)); if(evs.length)lastEv=evs[evs.length-1].id;
+ const L=t.limits, r=t.result, v=r&&r.verification, a=r&&r.analysis;
+ const bar=(x,m)=>`<div class="bar"><i style="width:${Math.min(100,100*x/m)}%"></i></div>`;
+ const live=!['completed','failed','cancelled','budget_exceeded','pr_opened','rejected','awaiting_approval'].includes(t.status);
+ setHTML('detail',`
+ <div class="card"><h2>Task ${esc(t.id)} ${pill(t.status)} outcome ${pill(t.outcome)} approval ${pill(t.approval)}</h2>
+  <div>${esc(t.issue)}</div>
+  <div class="stats" style="margin-top:10px">
+   <div class="stat"><b>$${t.cost_usd.toFixed(4)}</b><span>of $${L.max_cost_usd} cost</span>${bar(t.cost_usd,L.max_cost_usd)}</div>
+   <div class="stat"><b>${t.tool_calls}</b><span>of ${L.max_tool_calls} tool calls</span>${bar(t.tool_calls,L.max_tool_calls)}</div>
+   <div class="stat"><b>${t.elapsed_s.toFixed(0)}s</b><span>of ${L.max_seconds}s runtime</span>${bar(t.elapsed_s,L.max_seconds)}</div>
+   <div class="stat"><b>${t.retries}</b><span>retries · ${t.llm_calls} LLM calls · ${t.prompt_tokens}/${t.completion_tokens} tok</span></div></div>
+  ${live?'<button class="red" onclick="act(\'cancel\')">Cancel</button>':''}
+  ${t.status==='awaiting_approval'?'<button class="grn" onclick="act(\'approve\')">Approve</button><button class="red" onclick="act(\'reject\')">Reject</button>':''}
+  ${t.approval==='approved'&&t.status==='awaiting_approval'?'<button onclick="act(\'publish\')">Open draft PR</button>':''}
+  ${t.pr_url?`<div>Draft PR: <a style="color:var(--acc)" href="${esc(t.pr_url)}" target="_blank">${esc(t.pr_url)}</a> · branch ${esc(t.branch)} · CI rounds ${t.ci_rounds}</div>`:''}
+  ${t.error?`<pre class="err">${esc(t.error)}</pre>`:''}</div>
+ ${v?`<div class="card"><h2>Verification ${pill(v.outcome)}</h2><div>${esc(v.detail)}</div>${(v.fail_to_pass||[]).map(x=>`<div class="ev">fail→pass: <b>${esc(x)}</b></div>`).join('')}${v.after_failed&&v.after_failed.length?`<pre>${esc(v.after_failed.join('\n'))}</pre>`:''}</div>`:''}
+ ${a?`<div class="card"><h2>Analysis (${esc(a.confidence)} confidence)</h2><div>${esc(a.root_cause)}</div>${(a.evidence||[]).map(e=>`<div class="ev"><b>${esc(e.file)}:${esc(e.lines)}</b> ${esc(e.why)}</div>`).join('')}</div>`:''}
+ ${r&&r.diff?`<div class="card"><h2>Patch</h2><pre>${diff(r.diff)}</pre></div>`:''}
+ <div class="card"><h2>Actions &amp; logs</h2><pre>${evs.map(e=>`<div class="ev">${esc(e.ts.slice(11,19))} <b>${esc(e.kind)}</b> ${esc(e.message)} <span class="${e.kind.includes('error')?'err':''}">${esc(JSON.stringify(e.data))}</span></div>`).join('')}</pre></div>`);
+}
+refresh();setInterval(()=>refresh().catch(()=>{}),1500);
+</script></body></html>
