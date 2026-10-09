@@ -26,6 +26,7 @@ from issuepilot.persistence import RunStore
 from issuepilot.persistence.tasks import TaskStore
 from issuepilot.publish import NotApproved, approve, publish_task, reject
 from issuepilot.sandbox import Sandbox, SandboxUnavailable, default_sandbox
+from issuepilot.security import resolve_subdir
 
 UI_FILE = Path(__file__).parent / "static" / "index.html"
 
@@ -39,6 +40,7 @@ class FixRequest(BaseModel):
 class TaskRequest(BaseModel):
     issue: str = Field(min_length=1, max_length=20_000)
     repo_path: str
+    subdir: str = Field(default="", max_length=300)
     mode: Mode = Mode.DEVELOP
     max_cost_usd: float = Field(default=Limits.max_cost_usd, gt=0, le=5)
     max_seconds: float = Field(default=Limits.max_seconds, gt=0, le=3600)
@@ -96,7 +98,10 @@ def create_app(
 
     @app.post("/tasks", status_code=202)
     def start_task(req: TaskRequest) -> dict[str, str]:
-        repo = _repo(req.repo_path)
+        try:
+            repo, subdir = resolve_subdir(_repo(req.repo_path), req.subdir)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
         limits = Limits(
             max_cost_usd=req.max_cost_usd, max_seconds=req.max_seconds,
             max_tool_calls=req.max_tool_calls, max_attempts=req.max_attempts,
@@ -108,7 +113,9 @@ def create_app(
                 sandbox = make_sandbox()
             except SandboxUnavailable as exc:
                 raise HTTPException(503, str(exc)) from exc
-        tid = create_task(tasks, issue=req.issue, repo=str(repo), mode=req.mode, limits=limits)
+        tid = create_task(
+            tasks, issue=req.issue, repo=str(repo), mode=req.mode, limits=limits, subdir=subdir
+        )
 
         def job() -> None:
             run_task(settings, make_provider(), tasks, tid, sandbox=sandbox, run_tests=run)

@@ -30,7 +30,7 @@ from issuepilot.persistence.tasks import TaskRecord, TaskStore
 from issuepilot.planning.planner import PlanningError, create_plan
 from issuepilot.publish import NotApproved, approve, ci_followup, publish_task, reject
 from issuepilot.sandbox import Sandbox, SandboxUnavailable, default_sandbox
-from issuepilot.security import redact
+from issuepilot.security import redact, resolve_subdir
 from issuepilot.tools.github import fetch_issue
 from issuepilot.tools.repo import ToolError
 
@@ -58,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="observe = read-only analysis; develop = edit + verify in a sandbox (default); "
              "pr = develop, then wait for approval before opening a DRAFT PR.",
     )  # fmt: skip
+    fix.add_argument(
+        "--subdir",
+        help="Project folder inside --repo (monorepo): only it is analysed and tested, "
+        "and PR paths are prefixed with it.",
+    )
     fix.add_argument("--no-tests", action="store_true", help="Skip sandbox test verification.")
     fix.add_argument("--sandbox", choices=["docker", "local"], help="Default: docker.")
     fix.add_argument("--python", help="Interpreter for --sandbox local (unsafe; dev only).")
@@ -224,8 +229,12 @@ def run_fix(
     if run_tests and sandbox is None:
         sandbox = default_sandbox(args.sandbox, args.python)
     store = TaskStore(settings.db_path)
-    repo = str(Path(args.repo).resolve())
-    tid = create_task(store, issue=issue, repo=repo, mode=mode, limits=limits)
+    try:
+        work, subdir = resolve_subdir(Path(args.repo).resolve(), args.subdir or "")
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    tid = create_task(store, issue=issue, repo=str(work), mode=mode, limits=limits, subdir=subdir)
     rec = run_task(settings, provider, store, tid, sandbox=sandbox, run_tests=run_tests)
     result = result_of(rec)
     if args.output and result and result.diff:

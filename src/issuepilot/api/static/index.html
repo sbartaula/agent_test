@@ -30,6 +30,7 @@ pre{background:#0d1117;border:1px solid var(--line);border-radius:6px;padding:8p
  <div class="card"><h2>New task</h2>
   <label>Issue</label><textarea id="issue" placeholder="Describe the bug…"></textarea>
   <label>Repository path (inside allowed root)</label><input id="repo" value=".">
+  <label>Project subfolder (optional, for monorepos)</label><input id="subdir" placeholder="e.g. examples/bookshelf">
   <label>Permission mode</label>
   <select id="mode"><option value="observe">Observe — read-only analysis</option>
    <option value="develop" selected>Develop — edit + verify in Docker sandbox</option>
@@ -47,7 +48,7 @@ const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>]/g,c
 const pill=s=>`<span class="pill ${esc(s)}">${esc(s)||'-'}</span>`;
 async function api(path,opt){const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||r.status);return j}
 async function start(){$('err').textContent='';try{
- const j=await api('/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue:$('issue').value,repo_path:$('repo').value,mode:$('mode').value,max_cost_usd:+$('cost').value})});
+ const j=await api('/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue:$('issue').value,repo_path:$('repo').value,subdir:$('subdir').value,mode:$('mode').value,max_cost_usd:+$('cost').value})});
  select(j.id)}catch(e){$('err').textContent=e.message}}
 function select(id){sel=id;lastEv=0;evs=[];refresh()}
 async function act(a){try{await api(`/tasks/${sel}/${a}`,{method:'POST'})}catch(e){alert(e.message)}refresh()}

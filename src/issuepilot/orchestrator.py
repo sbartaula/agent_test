@@ -42,13 +42,15 @@ def _watch_cancel(store: TaskStore, task_id: str, tok: CancelToken, stop: thread
 
 
 def create_task(
-    store: TaskStore, *, issue: str, repo: str, mode: Mode, limits: Limits, kind: str = "fix"
-) -> str:
+    store: TaskStore, *, issue: str, repo: str, mode: Mode, limits: Limits, kind: str = "fix",
+    subdir: str = "",
+) -> str:  # fmt: skip
     import json
 
     return store.create(
-        kind=kind, mode=str(mode), repo=repo, issue=issue, limits_json=json.dumps(limits.to_dict())
-    )
+        kind=kind, mode=str(mode), repo=repo, issue=issue,
+        limits_json=json.dumps(limits.to_dict()), subdir=subdir,
+    )  # fmt: skip
 
 
 def _outcome_to_status(result: FixResult, mode: Mode) -> tuple[str, str]:

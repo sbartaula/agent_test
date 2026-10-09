@@ -254,3 +254,52 @@ def test_ci_failure_triggers_bounded_followup_on_same_branch(
     rec = store.get(tid)
     assert rec and rec.ci_rounds == Limits().max_ci_rounds
     assert git(remote, "rev-list", "--count", f"main..{branch}") == "3"  # no third follow-up
+
+
+def test_monorepo_subdir_fix_lands_under_the_subfolder(settings, store, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Project lives in <repo>/proj; the PR commit must touch proj/..., not the repo root."""
+    from issuepilot.security import resolve_subdir
+
+    seed = tmp_path / "seed"
+    (seed / "proj").mkdir(parents=True)
+    git(seed, "init", "-b", "main")
+    git(seed, "config", "user.email", "a@b.c")
+    git(seed, "config", "user.name", "t")
+    (seed / "README.md").write_text("monorepo\n")
+    (seed / "proj" / "calc.py").write_text("def add(a, b):\n    return a - b\n")
+    (seed / "proj" / "test_calc.py").write_text(
+        "from calc import add\n\ndef test_a():\n    assert add(1, 2) == 3\n"
+    )
+    git(seed, "add", ".")
+    git(seed, "commit", "-m", "init")
+    bare = tmp_path / "mono.git"
+    git(tmp_path, "clone", "--bare", str(seed), str(bare))
+    local = tmp_path / "local"
+    git(tmp_path, "clone", str(bare), str(local))
+
+    work, rel = resolve_subdir(local, "proj")
+    tid = create_task(
+        store, issue="add is wrong", repo=str(work), mode=Mode.PR, limits=Limits(), subdir=rel
+    )
+    rec = run_task(settings, FakeProvider([PLAN, FIX]), store, tid, sandbox=LocalSandbox())
+    assert rec.outcome == "verified" and rec.subdir == "proj"
+    approve(store, tid)
+    gh = FakeGitHub()
+    done = publish_task(settings, store, tid, gh.client(), slug="o/r", remote=str(bare),
+                        sandbox=LocalSandbox())  # fmt: skip
+    assert done.status == "pr_opened"
+    assert "a + b" in git(bare, "show", f"{done.branch}:proj/calc.py")
+    assert "a - b" in git(bare, "show", "main:proj/calc.py")
+    changed = git(bare, "diff", "--name-only", f"main..{done.branch}").split()
+    assert changed == ["proj/calc.py"]
+
+
+def test_resolve_subdir_rejects_escapes(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from issuepilot.security import resolve_subdir
+
+    (tmp_path / "proj").mkdir()
+    assert resolve_subdir(tmp_path, "proj/")[1] == "proj"
+    assert resolve_subdir(tmp_path, "") == (tmp_path, "")
+    for bad in ("../x", "/etc", ".git", "missing"):
+        with pytest.raises(ValueError):
+            resolve_subdir(tmp_path, bad)

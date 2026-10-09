@@ -18,7 +18,7 @@ from issuepilot.orchestrator import cancel_token, result_of
 from issuepilot.persistence.tasks import TaskRecord, TaskStore
 from issuepilot.runtime import TaskContext
 from issuepilot.sandbox import Sandbox
-from issuepilot.tools import ToolError
+from issuepilot.tools import Edit, ToolError
 
 
 class NotApproved(RuntimeError):
@@ -62,6 +62,13 @@ def _ctx(settings: Settings, store: TaskStore, rec: TaskRecord, token: str) -> T
     return TaskContext(
         rec.id, Mode(rec.mode), settings, limits, store, cancel_token(rec.id), prior, (token,)
     )
+
+
+def _in_subdir(edits: list[Edit], subdir: str) -> list[Edit]:
+    """Edits are relative to the project folder; the git clone is rooted at the repository."""
+    if not subdir:
+        return edits
+    return [e.model_copy(update={"path": f"{subdir}/{e.path}"}) for e in edits]
 
 
 def _pr_body(rec: TaskRecord, res: FixResult) -> str:
@@ -113,14 +120,17 @@ def publish_task(
             branch = f"issuepilot/{task_id}"
             ws.create_branch(branch)
             ws.apply_and_commit(
-                res.edits, f"fix: {rec.issue.splitlines()[0][:60]}\n\nIssuePilot task {task_id}"
+                _in_subdir(res.edits, rec.subdir),
+                f"fix: {rec.issue.splitlines()[0][:60]}\n\nIssuePilot task {task_id}",
             )
             if (
                 sandbox is not None
             ):  # never publish code that was not re-verified on the clean clone
                 with ctx.tool("run_tests", Capability.SANDBOX, label="pre-push re-verification"):
-                    r = sandbox.run_tests(ws.path, timeout=ctx.tracker.remaining_seconds() or 1,
-                                          cancel=ctx.tracker.cancel)  # fmt: skip
+                    r = sandbox.run_tests(
+                        ws.path / rec.subdir, timeout=ctx.tracker.remaining_seconds() or 1,
+                        cancel=ctx.tracker.cancel,
+                    )  # fmt: skip
                 if r.exit_code != 0 or r.infra_error:
                     raise GitError(f"pre-push verification failed:\n{r.output[-1500:]}")
             with ctx.tool("git_push", Capability.GITHUB_WRITE, branch=branch):
@@ -173,7 +183,7 @@ def ci_followup(
             ws.checkout_remote_branch(rec.branch)
             issue = f"{rec.issue}\n\nA previous fix was pushed but CI failed:\n{summary.text()}"
             res = run_agent(
-                provider, settings, issue, str(ws.path), run_tests=sandbox is not None,
+                provider, settings, issue, str(ws.path / rec.subdir), run_tests=sandbox is not None,
                 sandbox=sandbox, thread_id=f"{task_id}-ci{rec.ci_rounds + 1}",
                 max_attempts=ctx.limits.max_attempts, ctx=ctx,
             )  # fmt: skip
@@ -181,7 +191,10 @@ def ci_followup(
             if res.status not in ("verified", "unproven") or not res.edits:
                 ctx.event("ci_followup_failed", f"agent outcome: {res.status}")
                 return summary
-            ws.apply_and_commit(res.edits, f"fix: address CI failure (round {rec.ci_rounds + 1})")
+            ws.apply_and_commit(
+                _in_subdir(res.edits, rec.subdir),
+                f"fix: address CI failure (round {rec.ci_rounds + 1})",
+            )
             with ctx.tool("git_push", Capability.GITHUB_WRITE, branch=rec.branch):
                 ws.push()
         ctx.event("ci_followup_pushed", f"round {rec.ci_rounds + 1}", outcome=res.status)

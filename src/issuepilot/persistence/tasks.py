@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     elapsed_s REAL NOT NULL DEFAULT 0, limits_json TEXT NOT NULL DEFAULT '{}',
     result_json TEXT NOT NULL DEFAULT '{}', branch TEXT NOT NULL DEFAULT '',
     pr_url TEXT NOT NULL DEFAULT '', pr_number INTEGER NOT NULL DEFAULT 0,
-    ci_rounds INTEGER NOT NULL DEFAULT 0, cancel_requested INTEGER NOT NULL DEFAULT 0
+    ci_rounds INTEGER NOT NULL DEFAULT 0, cancel_requested INTEGER NOT NULL DEFAULT 0,
+    subdir TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, ts TEXT NOT NULL,
@@ -62,6 +63,7 @@ class TaskRecord(BaseModel):
     pr_number: int = 0
     ci_rounds: int = 0
     cancel_requested: int = 0
+    subdir: str = ""  # project folder inside the git repo (monorepo support)
 
 
 class EventRecord(BaseModel):
@@ -84,21 +86,26 @@ class TaskStore:
             Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         with closing(self._conn()) as c, c:
             c.executescript(SCHEMA)
+            cols = {r[1] for r in c.execute("PRAGMA table_info(tasks)")}
+            if "subdir" not in cols:  # databases created before monorepo support
+                c.execute("ALTER TABLE tasks ADD COLUMN subdir TEXT NOT NULL DEFAULT ''")
 
     def _conn(self) -> sqlite3.Connection:
         c = sqlite3.connect(self._path, timeout=30)
         c.row_factory = sqlite3.Row
         return c
 
-    def create(self, *, kind: str, mode: str, repo: str, issue: str,
-               limits_json: str = "{}", task_id: str | None = None) -> str:  # fmt: skip
+    def create(
+        self, *, kind: str, mode: str, repo: str, issue: str,
+        limits_json: str = "{}", task_id: str | None = None, subdir: str = "",
+    ) -> str:  # fmt: skip
         tid = task_id or uuid.uuid4().hex[:12]
         now = _now()
         with closing(self._conn()) as c, c:
             c.execute(
                 "INSERT INTO tasks (id, created_at, updated_at, kind, mode, repo, issue, status,"
-                " limits_json) VALUES (?,?,?,?,?,?,?,?,?)",
-                (tid, now, now, kind, mode, repo, issue, "queued", limits_json),
+                " limits_json, subdir) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (tid, now, now, kind, mode, repo, issue, "queued", limits_json, subdir),
             )
         return tid
 

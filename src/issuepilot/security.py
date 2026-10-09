@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 _SECRET_PATTERNS = [
     re.compile(r"sk-[A-Za-z0-9]{16,}"),
@@ -33,3 +33,16 @@ def is_protected_write(rel: str) -> bool:
     if parts[0] in _PROTECTED_TOP or ".git" in parts:
         return True
     return bool(_SECRET_FILE.match(parts[-1])) and parts[-1] != ".env.example"
+
+
+def resolve_subdir(root: Path, subdir: str) -> tuple[Path, str]:
+    """Return (working dir, normalized relative subdir) for a project folder inside a repo."""
+    rel = subdir.strip().strip("/")
+    if not rel:
+        return root, ""
+    if Path(rel).is_absolute() or ".." in Path(rel).parts or ".git" in Path(rel).parts:
+        raise ValueError(f"invalid --subdir: {subdir!r}")
+    work = (root / rel).resolve()
+    if not work.is_relative_to(root.resolve()) or not work.is_dir():
+        raise ValueError(f"--subdir {subdir!r} is not a directory inside the repository")
+    return work, Path(rel).as_posix()

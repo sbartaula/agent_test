@@ -46,6 +46,24 @@ issue -> plan -> gather -> analyse (observe)
 
 Docs: [Architecture](docs/ARCHITECTURE.md) | [Evaluation](docs/EVALUATION.md)
 
+## Quickstart: run and test it easily
+
+```bash
+make install     # uv sync
+cp .env.example .env   # then put your DEEPSEEK_API_KEY in .env (never commit it)
+make test        # 120+ offline tests, no API key or Docker needed
+make eval        # 16 offline eval cases (success / failure / security)
+make demo        # real fix of the bundled buggy app (needs key + Docker)
+make serve       # dashboard at http://127.0.0.1:8765 (set ISSUEPILOT_REPOS_ROOT)  (Ctrl+C to stop)
+```
+
+Monorepo / subfolder projects: `issuepilot fix "..." --repo <clone> --subdir examples/bookshelf --mode pr`
+analyses and tests only that folder; the PR commit touches `examples/bookshelf/...`.
+
+Draft PR flow (needs a fine-grained token exported in *your* shell):
+`export GITHUB_TOKEN=...` → `issuepilot fix ... --mode pr` → `issuepilot approve <id>` →
+`issuepilot publish <id> --slug owner/repo`. Never merges, never pushes to the default branch.
+
 ## Setup
 ```bash
 uv sync
