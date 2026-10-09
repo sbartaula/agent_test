@@ -65,7 +65,7 @@ async function refresh(){
  const t=await api('/tasks/'+sel); evs=evs.concat(await api(`/tasks/${sel}/events?after=${lastEv}`)); if(evs.length)lastEv=evs[evs.length-1].id;
  const L=t.limits, r=t.result, v=r&&r.verification, a=r&&r.analysis;
  const bar=(x,m)=>`<div class="bar"><i style="width:${Math.min(100,100*x/m)}%"></i></div>`;
- const live=!['completed','failed','cancelled','budget_exceeded','pr_opened','rejected','awaiting_approval'].includes(t.status);
+ const live=!['completed','failed','cancelled','budget_exceeded','pr_opened','merged','rejected','awaiting_approval'].includes(t.status);
  setHTML('detail',`
  <div class="card"><h2>Task ${esc(t.id)} ${pill(t.status)} outcome ${pill(t.outcome)} approval ${pill(t.approval)}</h2>
   <div>${esc(t.issue)}</div>

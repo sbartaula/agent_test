@@ -58,7 +58,7 @@ def test_ui_served(settings: Settings, repo_root: Path) -> None:
     c = client(settings, repo_root, [])
     html = c.get("/").text
     assert "IssuePilot" in html
-    assert "Merge PR" in html and "confirm(" in html
+    assert "Merge PR" in html and "confirm(" in html and "'merged'" in html
 
 
 def test_repo_path_confined_to_root(settings: Settings, repo_root: Path) -> None:
