@@ -12,7 +12,7 @@ from issuepilot.orchestrator import create_task
 from issuepilot.persistence.tasks import TaskStore
 from tests.conftest import FakeProvider
 
-_FAKE = "sk-" + "live-" + "x" * 16  # assembled at runtime: not a real secret
+_FAKE = "sk-" + "live-" + "9f8e7d6c" + "5b4a3921"  # assembled at runtime: not a real secret
 BUGGY = """
 import subprocess, yaml, requests
 API_KEY = "@@FAKE@@"
