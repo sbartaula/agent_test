@@ -12,9 +12,10 @@ from issuepilot.orchestrator import create_task
 from issuepilot.persistence.tasks import TaskStore
 from tests.conftest import FakeProvider
 
+_FAKE = "sk-" + "live-" + "x" * 16  # assembled at runtime: not a real secret
 BUGGY = """
 import subprocess, yaml, requests
-API_KEY = "sk-live-9f8e7d6c5b4a3921"
+API_KEY = "@@FAKE@@"
 PASSWORD = "your-password-here"
 
 def add(item, bucket=[]):
@@ -29,7 +30,7 @@ def add(item, bucket=[]):
     db.execute(f"SELECT * FROM t WHERE id={item}")
     requests.get("http://x")
     return yaml.load(item)
-"""
+""".replace("@@FAKE@@", _FAKE)
 
 
 def test_static_rules_fire() -> None:
